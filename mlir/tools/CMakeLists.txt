@@ -9,6 +9,7 @@ add_subdirectory(mlir-shlib)
 add_subdirectory(mlir-translate)
 add_subdirectory(tblgen-lsp-server)
 add_subdirectory(tblgen-to-irdl)
+add_subdirectory(tosa-smith)
 
 # mlir-runner requires ExecutionEngine.
 if(MLIR_ENABLE_EXECUTION_ENGINE)
