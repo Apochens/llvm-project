@@ -571,7 +571,7 @@ private:
     void initElementwiseBinOpGens() {
         cmptGenList.push_back(buildTosaAddOp());
         cmptGenList.push_back(buildTosaSubOp());
-        // cmptGenList.push_back(buildTosaMulOp());
+        //// cmptGenList.push_back(buildTosaMulOp());
         cmptGenList.push_back(buildTosaIntDivOp());
         cmptGenList.push_back(buildTosaPowOp());
 
@@ -585,7 +585,7 @@ private:
 
         cmptGenList.push_back(buildTosaLogicalLeftShiftOp());
         cmptGenList.push_back(buildTosaLogicalRightShiftOp());
-        cmptGenList.push_back(buildTosaArithmeticRightShiftOp());
+        //// cmptGenList.push_back(buildTosaArithmeticRightShiftOp());
 
         cmptGenList.push_back(buildTosaMaximumOp());
         cmptGenList.push_back(buildTosaMinimumOP());
@@ -977,7 +977,7 @@ CmptGen Operation::buildTosaArithmeticRightShiftOp() {
                 operand1.getType(),
                 operand1,
                 operand2,
-                true
+                builder.getBoolAttr(true)
             ).getOperation();
 
         parentCtx.addResultVals(newOp);
