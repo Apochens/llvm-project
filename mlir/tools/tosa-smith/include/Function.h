@@ -120,8 +120,7 @@ private:
     Context context;
 
     void buildTosaConstOps(mlir::OpBuilder &builder) {
-        mlir::Operation *constOp = op.buildTosaTransposeConst(builder);
-        context.setTransposeConst(constOp->getResult(0));
+        context.setTransposeAttr(builder.getDenseI32ArrayAttr({0, 2, 1}));
 
         mlir::Operation *indexOp = op.buildIndexConst(builder, 0);
         context.setIndexZeroConst(indexOp->getResult(0));

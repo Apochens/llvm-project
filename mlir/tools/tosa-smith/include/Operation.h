@@ -189,15 +189,6 @@ public:
         return constOp;
     }
 
-    mlir::Operation *buildTosaTransposeConst(mlir::OpBuilder &builder) {
-        mlir::DenseIntElementsAttr intAttr = builder.getI32TensorAttr({0, 2, 1});
-        return builder.create<mlir::tosa::ConstOp>(
-            builder.getUnknownLoc(),
-            intAttr.getShapedType(),
-            intAttr
-        ).getOperation();
-    }
-
     mlir::Operation *buildIndexConst(mlir::OpBuilder &builder, int64_t attrVal) {
         return builder.create<mlir::index::ConstantOp>(
             builder.getUnknownLoc(),
@@ -246,25 +237,37 @@ public:
 
     mlir::Operation *clampValueByTosaClampOp(mlir::OpBuilder &builder,
                                              mlir::Value &val,
-                                             ClampRegion region)
+                                             FClampRegion region)
     {
-        mlir::IntegerAttr minIntAttr =
-            builder.getI64IntegerAttr(std::get<0>(region));
-        mlir::IntegerAttr maxIntAttr =
-            builder.getI64IntegerAttr(std::get<1>(region));
-        mlir::FloatAttr minFloatAttr =
-            builder.getF32FloatAttr(std::get<2>(region));
-        mlir::FloatAttr maxFloatAttr =
-            builder.getF32FloatAttr(std::get<3>(region));
+        mlir::FloatAttr minAttr =
+            builder.getF32FloatAttr(std::get<0>(region));
+        mlir::FloatAttr maxAttr =
+            builder.getF32FloatAttr(std::get<1>(region));
     
         return builder.create<mlir::tosa::ClampOp>(
             builder.getUnknownLoc(),
             val.getType(),
             val,
-            minIntAttr,
-            maxIntAttr,
-            minFloatAttr,
-            maxFloatAttr
+            minAttr,
+            maxAttr
+        ).getOperation();
+    }
+
+    mlir::Operation *clampValueByTosaClampOp(mlir::OpBuilder &builder,
+                                             mlir::Value &val,
+                                             IClampRegion region)
+    {
+        mlir::IntegerAttr minAttr =
+            builder.getI64IntegerAttr(std::get<0>(region));
+        mlir::IntegerAttr maxAttr =
+            builder.getI64IntegerAttr(std::get<1>(region));
+
+        return builder.create<mlir::tosa::ClampOp>(
+            builder.getUnknownLoc(),
+            val.getType(),
+            val,
+            minAttr,
+            maxAttr
         ).getOperation();
     }
 
@@ -311,18 +314,28 @@ private:
             if (std::is_same<O, mlir::tosa::AddOp>::value
                 || std::is_same<O, mlir::tosa::SubOp>::value)
             {
-                ClampRegion region{
-                    INT32_MIN / 2, INT32_MAX / 2,
-                    (double) INT32_MIN / 2, (double) INT32_MAX / 2
-                };
+                
+                if (std::is_same<T, mlir::IntegerType>::value) {
+                    IClampRegion region{ INT32_MIN / 2, INT32_MAX / 2 };
+                    operand1 = this
+                        ->clampValueByTosaClampOp(builder, operand1, region)
+                        ->getResult(0);
+    
+                    operand2 = this
+                        ->clampValueByTosaClampOp(builder, operand2, region)
+                        ->getResult(0);
+                }
 
-                operand1 = this
-                    ->clampValueByTosaClampOp(builder, operand1, region)
-                    ->getResult(0);
-
-                operand2 = this
-                    ->clampValueByTosaClampOp(builder, operand2, region)
-                    ->getResult(0);
+                if (std::is_same<T, mlir::FloatType>::value) {
+                    FClampRegion region{ (double) INT32_MIN / 2, (double) INT32_MAX / 2 };
+                    operand1 = this
+                        ->clampValueByTosaClampOp(builder, operand1, region)
+                        ->getResult(0);
+    
+                    operand2 = this
+                        ->clampValueByTosaClampOp(builder, operand2, region)
+                        ->getResult(0);
+                }
             }
 
             // Recondition inputs for tosa.int_div
@@ -382,11 +395,19 @@ private:
                 ).getOperation();
                 operand2 = absOp->getResult(0);
 
-                mlir::Operation *clampOp = this->clampValueByTosaClampOp(
-                    builder, operand2, 
-                    {0, 16, 0, 16}
-                );
-                operand2 = clampOp->getResult(0);
+                if (std::is_same<T, mlir::IntegerType>::value) {
+                    mlir::Operation *clampOp = this->clampValueByTosaClampOp(
+                        builder, operand2, 
+                        IClampRegion{0, 16}
+                    );
+                    operand2 = clampOp->getResult(0);
+                } else {
+                    mlir::Operation *clampOp = this->clampValueByTosaClampOp(
+                        builder, operand2, 
+                        FClampRegion{0, 16}
+                    );
+                    operand2 = clampOp->getResult(0);
+                }
             }
 
             if (std::is_same<O, mlir::tosa::PowOp>::value) {
@@ -430,11 +451,19 @@ private:
                 ).getOperation();
                 operand = absOp->getResult(0);
 
-                mlir::Operation *clampOp = this->clampValueByTosaClampOp(
-                    builder, operand,
-                    {1, INT32_MAX, (double) 0.1, (double) INT32_MAX}
-                );
-                operand = clampOp->getResult(0);
+                if (std::is_same<T, mlir::IntegerType>::value) {
+                    mlir::Operation *clampOp = this->clampValueByTosaClampOp(
+                        builder, operand,
+                        IClampRegion{1, INT32_MAX}
+                    );
+                    operand = clampOp->getResult(0);
+                } else {
+                    mlir::Operation *clampOp = this->clampValueByTosaClampOp(
+                        builder, operand,
+                        FClampRegion{(double) 0.1, (double) INT32_MAX}
+                    );
+                    operand = clampOp->getResult(0);
+                }
             }
 
             if (std::is_same<O, mlir::tosa::ReciprocalOp>::value) {
@@ -464,10 +493,17 @@ private:
 
             // Value clamping for tosa.exp [e^x < i32_max]
             if (std::is_same<O, mlir::tosa::ExpOp>::value) {
-                operand = this->clampValueByTosaClampOp(
-                    builder, operand,
-                    {INT32_MIN, log(INT32_MAX), INT32_MIN, log(INT32_MAX)}
-                )->getResult(0);
+                if (std::is_same<T, mlir::IntegerType>::value) {
+                    operand = this->clampValueByTosaClampOp(
+                        builder, operand,
+                        IClampRegion{INT32_MIN, log(INT32_MAX)}
+                    )->getResult(0);
+                } else {
+                    operand = this->clampValueByTosaClampOp(
+                        builder, operand,
+                        FClampRegion{INT32_MIN, log(INT32_MAX)}
+                    )->getResult(0);
+                }
             }
 
             mlir::Operation *newOp = builder.create<O>(
@@ -486,11 +522,11 @@ private:
 //===----------------------------------------------------------------------===//
 
     CmptGen buildTosaArgMaxOp();
-    CmptGen buildTosaMatMulOp();
+    // CmptGen buildTosaMatMulOp();
 
     void initTensorOpGens() {
         cmptGenList.push_back(buildTosaArgMaxOp());
-        cmptGenList.push_back(buildTosaMatMulOp());
+        // cmptGenList.push_back(buildTosaMatMulOp());
     }
 
 //===----------------------------------------------------------------------===//
@@ -513,7 +549,7 @@ private:
 
     CmptGen buildTosaAddOp()    { return buildTosaBinaryOp<mlir::tosa::AddOp>(); }
     CmptGen buildTosaSubOp()    { return buildTosaBinaryOp<mlir::tosa::SubOp>(); }
-    CmptGen buildTosaMulOp();
+    // CmptGen buildTosaMulOp();
     CmptGen buildTosaIntDivOp() { return buildTosaBinaryOp<mlir::tosa::IntDivOp, mlir::IntegerType>(); }
     CmptGen buildTosaPowOp()    { return buildTosaBinaryOp<mlir::tosa::PowOp,    mlir::FloatType>(); }
 
@@ -535,7 +571,7 @@ private:
     void initElementwiseBinOpGens() {
         cmptGenList.push_back(buildTosaAddOp());
         cmptGenList.push_back(buildTosaSubOp());
-        cmptGenList.push_back(buildTosaMulOp());
+        // cmptGenList.push_back(buildTosaMulOp());
         cmptGenList.push_back(buildTosaIntDivOp());
         cmptGenList.push_back(buildTosaPowOp());
 
@@ -693,7 +729,7 @@ private:
     }
 
     CmptGen buildTosaReduceSumOp()  { return buildTosaReduceOp<mlir::tosa::ReduceSumOp>(); }
-    CmptGen buildTosaReduceProdOp() { return buildTosaReduceOp<mlir::tosa::ReduceProdOp>(); }
+    CmptGen buildTosaReduceProdOp() { return buildTosaReduceOp<mlir::tosa::ReduceProductOp>(); }
     CmptGen buildTosaReduceMaxOp()  { return buildTosaReduceOp<mlir::tosa::ReduceMaxOp>(); }
     CmptGen buildTosaReduceMinOp()  { return buildTosaReduceOp<mlir::tosa::ReduceMinOp>(); }
     CmptGen buildTosaReduceAllOp()  { return buildTosaReduceOp<mlir::tosa::ReduceAllOp, mlir::IntegerType, 1>(); }
@@ -712,16 +748,16 @@ private:
 // 08. Data Layout Operators
 //===----------------------------------------------------------------------===//
 
-    CmptGen buildTosaReshapeOp();
+    // CmptGen buildTosaReshapeOp();
     CmptGen buildTosaReverseOp();
-    CmptGen buildTosaSliceOp();
-    CmptGen buildTosaTileOp();
+    // CmptGen buildTosaSliceOp();
+    // CmptGen buildTosaTileOp();
 
     void initDataLayoutOpGens() {
-        cmptGenList.push_back(buildTosaReshapeOp());
+        // cmptGenList.push_back(buildTosaReshapeOp());
         cmptGenList.push_back(buildTosaReverseOp());
-        cmptGenList.push_back(buildTosaSliceOp());
-        cmptGenList.push_back(buildTosaTileOp());
+        // cmptGenList.push_back(buildTosaSliceOp());
+        // cmptGenList.push_back(buildTosaTileOp());
     }
 
 //===----------------------------------------------------------------------===//
@@ -755,53 +791,53 @@ private:
 
 namespace tosas {
 
-CmptGen Operation::buildTosaReshapeOp() {
-    return [](mlir::OpBuilder &builder, Context &parentCtx) {
-        mlir::Value operand = parentCtx.randomVal();
-        auto operandTy = mlir::cast<mlir::TensorType>(operand.getType());
+// CmptGen Operation::buildTosaReshapeOp() {
+//     return [](mlir::OpBuilder &builder, Context &parentCtx) {
+//         mlir::Value operand = parentCtx.randomVal();
+//         auto operandTy = mlir::cast<mlir::TensorType>(operand.getType());
 
-        int64_t totalElemCount = 1;
-        for (unsigned i = 0; i < operandTy.getRank(); i++)
-            totalElemCount *= operandTy.getShape()[i];
+//         int64_t totalElemCount = 1;
+//         for (unsigned i = 0; i < operandTy.getRank(); i++)
+//             totalElemCount *= operandTy.getShape()[i];
         
-        llvm::SmallVector<int64_t> factors;
-        auto randomFactor = [&factors](int64_t num) -> int64_t {
-            factors.clear();
+//         llvm::SmallVector<int64_t> factors;
+//         auto randomFactor = [&factors](int64_t num) -> int64_t {
+//             factors.clear();
 
-            for (int64_t i = 1; i < sqrt((double) num); i++) {
-                if (num % i == 0)
-                    factors.push_back(i);
-            }
+//             for (int64_t i = 1; i < sqrt((double) num); i++) {
+//                 if (num % i == 0)
+//                     factors.push_back(i);
+//             }
 
-            return (factors.size() == 1 && factors[0] == 1) ? num : random(factors);
-        };
+//             return (factors.size() == 1 && factors[0] == 1) ? num : random(factors);
+//         };
 
-        llvm::SmallVector<int64_t> newShape;
-        while (totalElemCount != 1) {
-            int64_t curElemCount = randomFactor(totalElemCount);
-            newShape.push_back(curElemCount);
-            totalElemCount /= curElemCount;
-        }
+//         llvm::SmallVector<int64_t> newShape;
+//         while (totalElemCount != 1) {
+//             int64_t curElemCount = randomFactor(totalElemCount);
+//             newShape.push_back(curElemCount);
+//             totalElemCount /= curElemCount;
+//         }
 
-        // The rank of the tensor is 0
-        if (newShape.empty()) {
-            newShape.push_back(1);
-        }
+//         // The rank of the tensor is 0
+//         if (newShape.empty()) {
+//             newShape.push_back(1);
+//         }
 
-        mlir::Operation *newOp = builder.create<mlir::tosa::ReshapeOp>(
-            builder.getUnknownLoc(),
-            mlir::RankedTensorType::get(
-                newShape,
-                operandTy.getElementType()
-            ),
-            operand,
-            builder.getDenseI64ArrayAttr(newShape)
-        ).getOperation();
+//         mlir::Operation *newOp = builder.create<mlir::tosa::ReshapeOp>(
+//             builder.getUnknownLoc(),
+//             mlir::RankedTensorType::get(
+//                 newShape,
+//                 operandTy.getElementType()
+//             ),
+//             operand,
+//             builder.getDenseI64ArrayAttr(newShape)
+//         ).getOperation();
 
-        parentCtx.addResultVals(newOp);
-        return newOp;
-    };
-}
+//         parentCtx.addResultVals(newOp);
+//         return newOp;
+//     };
+// }
 
 CmptGen Operation::buildTosaReverseOp() {
     return [](mlir::OpBuilder &builder, Context &parentCtx) {
@@ -823,100 +859,100 @@ CmptGen Operation::buildTosaReverseOp() {
     };
 }
 
-CmptGen Operation::buildTosaSliceOp() {
-    return [](mlir::OpBuilder &builder, Context &parentCtx) {
-        mlir::Value operand = parentCtx.randomVal();
-        auto operandTy = mlir::cast<mlir::TensorType>(operand.getType());
+// CmptGen Operation::buildTosaSliceOp() {
+//     return [](mlir::OpBuilder &builder, Context &parentCtx) {
+//         mlir::Value operand = parentCtx.randomVal();
+//         auto operandTy = mlir::cast<mlir::TensorType>(operand.getType());
 
-        llvm::SmallVector<int64_t> startVals, sizeVals;
-        for (unsigned i = 0; i < operandTy.getRank(); i++) {
-            int64_t start = random(operandTy.getShape()[i] - 1);
-            int64_t size = random(operandTy.getShape()[i] - start, 1);
+//         llvm::SmallVector<int64_t> startVals, sizeVals;
+//         for (unsigned i = 0; i < operandTy.getRank(); i++) {
+//             int64_t start = random(operandTy.getShape()[i] - 1);
+//             int64_t size = random(operandTy.getShape()[i] - start, 1);
 
-            startVals.push_back(start);
-            sizeVals.push_back(size);
-        }
+//             startVals.push_back(start);
+//             sizeVals.push_back(size);
+//         }
 
-        mlir::Operation *newOp = builder.create<mlir::tosa::SliceOp>(
-            builder.getUnknownLoc(),
-            mlir::RankedTensorType::get(
-                sizeVals,
-                operandTy.getElementType()
-            ),
-            operand,
-            builder.getDenseI64ArrayAttr(startVals),
-            builder.getDenseI64ArrayAttr(sizeVals)
-        ).getOperation();
+//         mlir::Operation *newOp = builder.create<mlir::tosa::SliceOp>(
+//             builder.getUnknownLoc(),
+//             mlir::RankedTensorType::get(
+//                 sizeVals,
+//                 operandTy.getElementType()
+//             ),
+//             operand,
+//             builder.getDenseI64ArrayAttr(startVals),
+//             builder.getDenseI64ArrayAttr(sizeVals)
+//         ).getOperation();
 
-        parentCtx.addResultVals(newOp);
-        return newOp;
-    };
-}
+//         parentCtx.addResultVals(newOp);
+//         return newOp;
+//     };
+// }
 
-CmptGen Operation::buildTosaTileOp() {
-    return [](mlir::OpBuilder &builder, Context &parentCtx) {
-        mlir::Value operand = parentCtx.randomVal();
-        auto operandTy = mlir::cast<mlir::TensorType>(operand.getType());
+// CmptGen Operation::buildTosaTileOp() {
+//     return [](mlir::OpBuilder &builder, Context &parentCtx) {
+//         mlir::Value operand = parentCtx.randomVal();
+//         auto operandTy = mlir::cast<mlir::TensorType>(operand.getType());
         
-        llvm::SmallVector<int64_t> mulVals, newShape;
-        for (unsigned i = 0; i < operandTy.getRank(); i++) {
-            int64_t multiple = random(5, 1);
-            mulVals.push_back(multiple);
-            newShape.push_back(multiple * operandTy.getShape()[i]);
-        }
-        mlir::DenseI64ArrayAttr multiples = builder.getDenseI64ArrayAttr(mulVals);
-        auto newTy = mlir::RankedTensorType::get(newShape, operandTy.getElementType());
+//         llvm::SmallVector<int64_t> mulVals, newShape;
+//         for (unsigned i = 0; i < operandTy.getRank(); i++) {
+//             int64_t multiple = random(5, 1);
+//             mulVals.push_back(multiple);
+//             newShape.push_back(multiple * operandTy.getShape()[i]);
+//         }
+//         mlir::DenseI64ArrayAttr multiples = builder.getDenseI64ArrayAttr(mulVals);
+//         auto newTy = mlir::RankedTensorType::get(newShape, operandTy.getElementType());
 
-        mlir::Operation *newOp = builder.create<mlir::tosa::TileOp>(
-            builder.getUnknownLoc(),
-            newTy,
-            operand,
-            multiples
-        ).getOperation();
+//         mlir::Operation *newOp = builder.create<mlir::tosa::TileOp>(
+//             builder.getUnknownLoc(),
+//             newTy,
+//             operand,
+//             multiples
+//         ).getOperation();
 
-        parentCtx.addResultVals(newOp);
-        return newOp;
-    };
-}
+//         parentCtx.addResultVals(newOp);
+//         return newOp;
+//     };
+// }
 
-CmptGen Operation::buildTosaMulOp() {
-    return [this](mlir::OpBuilder &builder, Context &parentCtx) {
-        auto [operand1, operand2] = parentCtx.randomValPair();
+// CmptGen Operation::buildTosaMulOp() {
+//     return [this](mlir::OpBuilder &builder, Context &parentCtx) {
+//         auto [operand1, operand2] = parentCtx.randomValPair();
 
-        // If the two oepration has different types, convert the integer one to float
-        if (operand1.getType() != operand2.getType()) {
-            if (isElemOfTy<mlir::IntegerType>(operand1)) {
-                mlir::Operation *castOp = this->castToFloatByTosaCastOp(builder, operand1);
-                parentCtx.addResultVals(castOp);
-                operand1 = castOp->getResult(0);
-            }
-            if (isElemOfTy<mlir::IntegerType>(operand2)) {
-                mlir::Operation *castOp = this->castToFloatByTosaCastOp(builder, operand2);
-                parentCtx.addResultVals(castOp);
-                operand2 = castOp->getResult(0);
-            }
-        }
+//         // If the two oepration has different types, convert the integer one to float
+//         if (operand1.getType() != operand2.getType()) {
+//             if (isElemOfTy<mlir::IntegerType>(operand1)) {
+//                 mlir::Operation *castOp = this->castToFloatByTosaCastOp(builder, operand1);
+//                 parentCtx.addResultVals(castOp);
+//                 operand1 = castOp->getResult(0);
+//             }
+//             if (isElemOfTy<mlir::IntegerType>(operand2)) {
+//                 mlir::Operation *castOp = this->castToFloatByTosaCastOp(builder, operand2);
+//                 parentCtx.addResultVals(castOp);
+//                 operand2 = castOp->getResult(0);
+//             }
+//         }
 
-        // Value clamping
-        ClampRegion region = { - (1 << 16), 1 << 16, (double) - (1 << 16), (double) (1 << 16)};
-        operand1 = this->clampValueByTosaClampOp(builder, operand1, region)
-            ->getResult(0);
-        operand2 = this->clampValueByTosaClampOp(builder, operand2, region)
-            ->getResult(0);
+//         // Value clamping
+//         ClampRegion region = { - (1 << 16), 1 << 16, (double) - (1 << 16), (double) (1 << 16)};
+//         operand1 = this->clampValueByTosaClampOp(builder, operand1, region)
+//             ->getResult(0);
+//         operand2 = this->clampValueByTosaClampOp(builder, operand2, region)
+//             ->getResult(0);
 
-        mlir::Operation *newOp = builder.create<mlir::tosa::MulOp>(
-            builder.getUnknownLoc(),
-            operand1.getType(),
-            operand1,
-            operand2,
-            // 'tosa.mul' op require shift to be 0 for float type
-            operand1.getType().isInteger() ? random(4) : 0
-        ).getOperation();
+//         mlir::Operation *newOp = builder.create<mlir::tosa::MulOp>(
+//             builder.getUnknownLoc(),
+//             operand1.getType(),
+//             operand1,
+//             operand2,
+//             // 'tosa.mul' op require shift to be 0 for float type
+//             operand1.getType().isInteger() ? random(4) : 0
+//         ).getOperation();
 
-        parentCtx.addResultVals(newOp);
-        return newOp;
-    };
-}
+//         parentCtx.addResultVals(newOp);
+//         return newOp;
+//     };
+// }
 
 CmptGen Operation::buildTosaArithmeticRightShiftOp() {
     return [this](mlir::OpBuilder &builder, Context &parentCtx) {
@@ -931,7 +967,7 @@ CmptGen Operation::buildTosaArithmeticRightShiftOp() {
 
         mlir::Operation *clampOp = this->clampValueByTosaClampOp(
             builder, operand2, 
-            {0, 16, 0, 16}
+            IClampRegion{0, 16}
         );
         operand2 = clampOp->getResult(0);
 
@@ -1026,64 +1062,64 @@ CmptGen Operation::buildTosaSelectOp() {
     };
 }
 
-CmptGen Operation::buildTosaMatMulOp() {
-    return [this](mlir::OpBuilder &builder, Context &parentCtx) {
-        auto [operand1, operand2] = parentCtx.randomValPair();
-        if (operand1 == nullptr)
-            return (mlir::Operation *) nullptr;
+// CmptGen Operation::buildTosaMatMulOp() {
+//     return [this](mlir::OpBuilder &builder, Context &parentCtx) {
+//         auto [operand1, operand2] = parentCtx.randomValPair();
+//         if (operand1 == nullptr)
+//             return (mlir::Operation *) nullptr;
 
-        mlir::RankedTensorType op2Ty = mlir::cast<mlir::RankedTensorType>(operand2.getType());
-        if (op2Ty.getRank() != 3)
-            return (mlir::Operation *) nullptr;
+//         mlir::RankedTensorType op2Ty = mlir::cast<mlir::RankedTensorType>(operand2.getType());
+//         if (op2Ty.getRank() != 3)
+//             return (mlir::Operation *) nullptr;
 
-        // If the two oepration has different types, convert the integer one to float
-        if (operand1.getType() != operand2.getType()) {
-            if (isElemOfTy<mlir::IntegerType>(operand1)) {
-                mlir::Operation *castOp = this->castToFloatByTosaCastOp(builder, operand1);
-                parentCtx.addResultVals(castOp);
-                operand1 = castOp->getResult(0);
-            }
-            if (isElemOfTy<mlir::IntegerType>(operand2)) {
-                mlir::Operation *castOp = this->castToFloatByTosaCastOp(builder, operand2);
-                parentCtx.addResultVals(castOp);
-                operand2 = castOp->getResult(0);
-            }
-        }
+//         // If the two oepration has different types, convert the integer one to float
+//         if (operand1.getType() != operand2.getType()) {
+//             if (isElemOfTy<mlir::IntegerType>(operand1)) {
+//                 mlir::Operation *castOp = this->castToFloatByTosaCastOp(builder, operand1);
+//                 parentCtx.addResultVals(castOp);
+//                 operand1 = castOp->getResult(0);
+//             }
+//             if (isElemOfTy<mlir::IntegerType>(operand2)) {
+//                 mlir::Operation *castOp = this->castToFloatByTosaCastOp(builder, operand2);
+//                 parentCtx.addResultVals(castOp);
+//                 operand2 = castOp->getResult(0);
+//             }
+//         }
 
-        // Transpose one of the operands, i.e., switch the 2th and 3th dimensions
-        llvm::SmallVector<int64_t> transposedShape = {
-            op2Ty.getShape()[0],
-            op2Ty.getShape()[2],
-            op2Ty.getShape()[1]
-        };
+//         // Transpose one of the operands, i.e., switch the 2th and 3th dimensions
+//         llvm::SmallVector<int64_t> transposedShape = {
+//             op2Ty.getShape()[0],
+//             op2Ty.getShape()[2],
+//             op2Ty.getShape()[1]
+//         };
 
-        mlir::RankedTensorType transposedTy = mlir::RankedTensorType::get(
-            transposedShape,
-            op2Ty.getElementType()
-        );
-        mlir::Operation *transposeOp = builder.create<mlir::tosa::TransposeOp>(
-            builder.getUnknownLoc(),
-            transposedTy,
-            operand2,
-            parentCtx.getTransposeConst()
-        ).getOperation();
-        operand2 = transposeOp->getResult(0);
+//         mlir::RankedTensorType transposedTy = mlir::RankedTensorType::get(
+//             transposedShape,
+//             op2Ty.getElementType()
+//         );
+//         mlir::Operation *transposeOp = builder.create<mlir::tosa::TransposeOp>(
+//             builder.getUnknownLoc(),
+//             transposedTy,
+//             operand2,
+//             parentCtx.getTransposeAttr()
+//         ).getOperation();
+//         operand2 = transposeOp->getResult(0);
 
-        mlir::RankedTensorType newTy = mlir::RankedTensorType::get(
-            {op2Ty.getShape()[0], op2Ty.getShape()[1], op2Ty.getShape()[1]},
-            op2Ty.getElementType()
-        );
-        mlir::Operation *newOp = builder.create<mlir::tosa::MatMulOp>(
-            builder.getUnknownLoc(),
-            newTy,
-            operand1,
-            operand2
-        ).getOperation();
+//         mlir::RankedTensorType newTy = mlir::RankedTensorType::get(
+//             {op2Ty.getShape()[0], op2Ty.getShape()[1], op2Ty.getShape()[1]},
+//             op2Ty.getElementType()
+//         );
+//         mlir::Operation *newOp = builder.create<mlir::tosa::MatMulOp>(
+//             builder.getUnknownLoc(),
+//             newTy,
+//             operand1,
+//             operand2
+//         ).getOperation();
 
-        parentCtx.addResultVals(newOp);
-        return transposeOp;
-    };
-}
+//         parentCtx.addResultVals(newOp);
+//         return transposeOp;
+//     };
+// }
 
 CallGen Operation::buildFuncCallOp() {
     return [](mlir::OpBuilder &builder, Context &parentCtx) {
@@ -1158,8 +1194,8 @@ CtrlGen Operation::buildTosaIfOp() {
             );
             return true;
         };
-        if (!buildBranch(condIf.getThenBranch())
-            || !buildBranch(condIf.getElseBranch()))
+        if (!buildBranch(condIf.getThenGraph())
+            || !buildBranch(condIf.getElseGraph()))
             return (mlir::Operation *) nullptr;        
         
         builder.restoreInsertionPoint(savedBuildPos);
@@ -1188,7 +1224,7 @@ CtrlGen Operation::buildTosaWhileOp() {
         auto savedBuildPos = builder.saveInsertionPoint();
 
         // Loop condition region
-        mlir::Block *condBlock = builder.createBlock(&whileLoop.getCond());
+        mlir::Block *condBlock = builder.createBlock(&whileLoop.getCondGraph());
         condBlock->addArgument(indVar.getType(), indVar.getLoc());
 
         mlir::Value iterTimes = this->buildConstTensor(
@@ -1218,7 +1254,7 @@ CtrlGen Operation::buildTosaWhileOp() {
                                             mlir::ValueRange(condYieldVal));
 
         // Loop body region
-        mlir::Block *bodyBlock = builder.createBlock(&whileLoop.getBody());
+        mlir::Block *bodyBlock = builder.createBlock(whileLoop.getBody());
         bodyBlock->addArgument(indVar.getType(), indVar.getLoc());
 
         Context whileBodyCtx(parentCtx);

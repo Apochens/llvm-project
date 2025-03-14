@@ -28,7 +28,9 @@ const unsigned funcRetNumMax = 1; // [0, 1]
 const llvm::SmallVector<unsigned> SUPPORTED_INT_WIDTH   = {32};
 const llvm::SmallVector<unsigned> SUPPORTED_FLOAT_WIDTH = {32};
 
-using ClampRegion = std::tuple<int64_t, int64_t, double, double>;
+using IClampRegion = std::tuple<int64_t, int64_t>;
+using FClampRegion = std::tuple<double, double>;
+
 using NumRange = std::pair<unsigned, unsigned>;
 
 enum class CtrlFlowTy {

@@ -100,8 +100,8 @@ public:
     inline void addDefinedFunc(mlir::Operation *f) { moduleFuncs.insert(f); }
     inline bool hasDefinedFunc() const { return moduleFuncs.size() > 0; }
 
-    inline void setTransposeConst(mlir::Value val) { transposeConst = val; }
-    inline mlir::Value getTransposeConst() const { return transposeConst; }
+    inline void setTransposeAttr(mlir::DenseI32ArrayAttr attr) { transposeAttr = attr; }
+    inline mlir::DenseI32ArrayAttr getTransposeAttr() const { return transposeAttr; }
 
     inline void setIndexZeroConst(mlir::Value val) { indexZeroConst = val; }
     inline mlir::Value getIndexZeroConst() const { return indexZeroConst; }
@@ -114,7 +114,7 @@ private:
     llvm::DenseSet<mlir::Value> resultVals;
     llvm::DenseSet<mlir::Operation *> moduleFuncs;
 
-    mlir::Value transposeConst;
+    mlir::DenseI32ArrayAttr transposeAttr;
     mlir::Value indexZeroConst;
     mlir::TensorType initTensorTy;
 };
